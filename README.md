@@ -27,7 +27,8 @@ build_flags =
 	-DWIFI_PASSWORD=\"${sysenv.WIFI_PASSWORD}\"
 ``````
 Once running and connected, the server will announce itself via mDNS.
-images/zeroconf.png
+
+If the access point cant be found, the server runs in access point mode using SSID `protomaps` password `brandonrocks` .
 
 ![nMDS announcement](https://github.com/mhaberler/esp32-leaflet-protomaps/raw/master/images/zeroconf.png "nMDS announcement")
 
@@ -67,7 +68,7 @@ Copy the file to the /maps directory on the SD card, and edit /www/index.html to
 ## Parts used
 - [Brandon Liu's](https://github.com/bdon) phenomenal [PMtiles](https://github.com/protomaps/PMTiles) format and the [protomap.js](https://github.com/protomaps/protomaps.js) client library 
 - Bill Greiman's [SdFat Version 2 - Arduino FAT16/FAT32 exFAT Library](https://github.com/greiman/SdFat.git#57900b2) (as-is, current master)
-- a [fork](https://github.com/BalloonWare/ESPAsyncWebServer.git#mah) of the [ESPAsyncWebServer](https://github.com/esphome/ESPAsyncWebServer) modified to support [HTTP Range requests]/(https://github.com/BalloonWare/ESPAsyncWebServer/commit/0bc9b3474cd05fdbebf9db74954eff7ea0f590f0), and [serve files from an exFat file system](https://github.com/BalloonWare/ESPAsyncWebServer/commit/3cff86b455ee2c099144993da80a11633feab30b) on SD
+- a [fork](https://github.com/BalloonWare/ESPAsyncWebServer/tree/mah) of the [ESPAsyncWebServer](https://github.com/esphome/ESPAsyncWebServer) modified to support [HTTP Range requests]/(https://github.com/BalloonWare/ESPAsyncWebServer/commit/0bc9b3474cd05fdbebf9db74954eff7ea0f590f0), and [serve files from an exFat file system](https://github.com/BalloonWare/ESPAsyncWebServer/commit/3cff86b455ee2c099144993da80a11633feab30b) on SD
 - A [fork](https://github.com/BalloonWare/AsyncTCP/commits/mah) of the [AsyncTCP](https://github.com/me-no-dev/AsyncTCP) library by [@me-no-dev](https://github.com/me-no-dev) for [ESPHome](https://esphome.io), modified to [make the async_tcp event queue size configurable](https://github.com/BalloonWare/AsyncTCP/commit/214f3841cd00c36ee4c077605e27f1d1bff2155c)
 
 ### tuning knobs twisted:
@@ -77,7 +78,12 @@ The solution was to use exFat (technically a 64bit file system), use the SdFat l
 and extend ESPAsyncWebServer to serve static files from exFat. The code is not as elegant as I liked it to be,
 but I saw no easy way to subclass a 32bit file system with the 64bit exFat.
 
-Protomaps rely on HTTP range requests, and stock ESPAsyncWebServer does not support that. I extended it to
+SdFat would perform even better if one could use the ENABLE_DEDICATED_SPI define. 
+However, this assumes a single thread is doing all the SPI work. 
+This is not the case when using ESPAsyncWebServer: the open() happens in user code (whatever thread that happens to be at the time),
+whereas the reads are done by the `async_tcp` service task of the AsyncTCP stack as needed. This leads to crashes like described [here](https://github.com/greiman/SdFat/issues/349) .
+
+Protomaps relies on HTTP range requests, and stock ESPAsyncWebServer does not support that. I extended it to
 support range requests, which was suprisingly easy.
 
 The stock [AsyncTCP](https://github.com/me-no-dev/AsyncTCP) request queue is [size 32](https://github.com/me-no-dev/AsyncTCP/blob/master/src/AsyncTCP.cpp#L98). With rapid scroll-zooming in/out the web server can easiyl overwhelmed by requests.

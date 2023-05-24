@@ -3,12 +3,13 @@
 #include <M5Unified.h>
 #endif
 
-#include "SdFatConfig.h"
 #include "SPI.h"
 #include "SdFat.h"
+#include "SdFatConfig.h"
 
 #include <Arduino.h>
 #include <AsyncTCP.h>
+#include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <SD.h>
@@ -16,11 +17,14 @@
 #include <Wire.h>
 #include <esp_task_wdt.h>
 
+DNSServer dnsServer;
 AsyncWebServer server(80);
 
-const char *ssid = WIFI_SSID;
-const char *password = WIFI_PASSWORD;
-const char *hostname = "leaflet-protomaps";
+const char *ssid = WIFI_CLIENT_SSID;
+const char *password = WIFI_CLIENT_PASSWORD;
+const char *ap_ssid = WIFI_AP_SSID;
+const char *ap_password = WIFI_AP_PASSWORD;
+const char *hostname = HOSTNAME;
 
 // SD card
 #define SD_WAIT_MS 2000
@@ -38,8 +42,20 @@ const char *hostname = "leaflet-protomaps";
 #define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SPI_CLOCK)
 
 SdBaseFile file;
-
+bool run_dns = false;
 AsyncStaticSdFatWebHandler *handler;
+
+class CaptiveRequestHandler : public AsyncWebHandler {
+public:
+  CaptiveRequestHandler() {}
+  virtual ~CaptiveRequestHandler() {}
+
+  bool canHandle(AsyncWebServerRequest *request) { return true; }
+
+  void handleRequest(AsyncWebServerRequest *request) {
+    request->redirect(HTML);
+  }
+};
 
 void describeCard(SdFat &sd);
 
@@ -59,7 +75,7 @@ void setup() {
   while (!Serial) {
     yield();
   }
-
+  // SD.begin();
 #ifdef CUSTOM_SPI_INIT
   // see
   // https://github.com/espressif/esp-idf/blob/master/examples/storage/sd_card/sdspi/README.md#pin-assignments
@@ -67,8 +83,8 @@ void setup() {
 #endif
 
   handler = new AsyncStaticSdFatWebHandler("/", "/", "");
-  handler->setDefaultFile(HTML);
 
+  Serial.printf("trying to mount SD...\n");
   uint32_t start = millis();
   bool sd_mounted;
   while (1) {
@@ -90,18 +106,26 @@ void setup() {
   }
   describeCard(handler->_fs);
 
+  Serial.printf("trying to connect to Wifi AP %s using %s\n", ssid, password);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  if (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    Serial.printf("WiFi Failed!\n");
-    return;
+  if (WiFi.waitForConnectResult(5000) != WL_CONNECTED) {
+    Serial.printf("WiFi connect failed, switching to AP mode using %s %s\n",
+                  ap_ssid, ap_password);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(ap_ssid, ap_password);
+    WiFi.softAPsetHostname(hostname);
+    dnsServer.start(53, "*", WiFi.softAPIP());
+    run_dns = true;
+    Serial.printf("IP address: %s\n", WiFi.softAPIP().toString().c_str());
+  } else {
+    Serial.printf("connected to AP %s\n", ssid);
+    WiFi.printDiag(Serial);
   }
   if (MDNS.begin(hostname)) {
     MDNS.addService("http", "tcp", 80);
     MDNS.addServiceTxt("http", "tcp", "path", HTML);
   }
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
 
 #ifdef WDT_TIMEOUT
   Serial.printf("Configuring watchdog timer to %d seconds\n", WDT_TIMEOUT);
@@ -111,6 +135,7 @@ void setup() {
 
   server.onNotFound(notFound);
   server.addHandler(handler);
+  server.addHandler(new CaptiveRequestHandler());
   server.begin();
 }
 
@@ -118,7 +143,9 @@ void loop() {
 #ifdef WDT_TIMEOUT
   esp_task_wdt_reset();
 #endif
-  delay(100);
+  if (run_dns)
+    dnsServer.processNextRequest();
+  yield();
 }
 
 void describeCard(SdFat &sd) {
