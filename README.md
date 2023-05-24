@@ -37,8 +37,7 @@ click on the link and it should take you to the demo app:
 
 
 ## Platforms tested
-- M5Stack Core2
-- M5Stack CoreS3
+
 - Espressif ESP32-S3-DevKitM-1-N8 development board
 
 ## Installation
