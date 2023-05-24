@@ -1,3 +1,9 @@
 [submodule "lib/ESPAsyncWebServer"]
 	path = lib/ESPAsyncWebServer
 	url = https://github.com/BalloonWare/ESPAsyncWebServer.git
+[submodule "python/RangeHTTPServer"]
+	path = python/RangeHTTPServer
+	url = https://github.com/mhaberler/RangeHTTPServer.git
+[submodule "lib/AsyncTCP"]
+	path = lib/AsyncTCP
+	url = https://github.com/BalloonWare/AsyncTCP.git
