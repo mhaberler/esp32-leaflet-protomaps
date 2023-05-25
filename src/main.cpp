@@ -1,13 +1,15 @@
 
 
-
-#include "SdFat.h"
 #include "SPI.h"
+#include "SdFat.h"
 #include "SdFatConfig.h"
 #ifdef M5UNIFIED
 #include <M5Unified.h>
-#endif 
+#endif
 #include <Arduino.h>
+#ifdef CARD_DETECT_PIN
+#include "FunctionalInterrupt.h"
+#endif
 #include <AsyncTCP.h>
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
@@ -36,9 +38,29 @@ const char *hostname = HOSTNAME;
 
 SdBaseFile file;
 bool run_dns = false;
+
+volatile int numberOfButtonInterrupts = 0;
+volatile bool lastState;
+volatile uint32_t debounceTimeout = 0;
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+uint32_t saveDebounceTimeout;
+bool saveLastState;
+int save;
+
 AsyncStaticSdFatWebHandler *handler;
 
 void describeCard(SdFat &sd);
+
+#ifdef CARD_DETECT_PIN
+void IRAM_ATTR cardInsertISR(void) {
+  portENTER_CRITICAL_ISR(&mux);
+  numberOfButtonInterrupts++;
+  lastState = digitalRead(CARD_DETECT_PIN);
+  debounceTimeout =
+      xTaskGetTickCount(); // version of millis() that works from interrupt
+  portEXIT_CRITICAL_ISR(&mux);
+}
+#endif
 
 class CaptiveRequestHandler : public AsyncWebHandler {
 public:
@@ -73,10 +95,19 @@ void setup() {
     yield();
   }
 
+#ifdef CARD_DETECT_PIN
+  // Adafruit SD card breakout: this pin shorts to ground if NO card is inserted
+  pinMode(CARD_DETECT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(CARD_DETECT_PIN), cardInsertISR,
+                  CHANGE);
+  Serial.printf("attaching card detect IRQ on pin %u, current state: %d\n",
+                CARD_DETECT_PIN, digitalRead(CARD_DETECT_PIN));
+#endif
+
 #ifdef GENERIC_ESP32S3
   // if the default SPI has not been initialized (eg by initing a display)
   // do so now
-  // 
+  //
   // for pins, see
   // https://github.com/espressif/esp-idf/blob/master/examples/storage/sd_card/sdspi/README.md#pin-assignments
   SPI.begin(36, 37, 35);
@@ -146,6 +177,53 @@ void loop() {
 #endif
   if (run_dns)
     dnsServer.processNextRequest();
+
+#ifdef CARD_DETECT_PIN
+  // if (card_detect ^ track_card_detect) {
+  //   Serial.printf("card detect pin changed, now %d\n", card_detect);
+  //   track_card_detect = card_detect;
+  // }
+  portENTER_CRITICAL_ISR(&mux); // so that value of numberOfButtonInterrupts,l
+                                // astState are atomic - Critical Section
+  save = numberOfButtonInterrupts;
+  saveDebounceTimeout = debounceTimeout;
+  saveLastState = lastState;
+  portEXIT_CRITICAL_ISR(&mux); // end of Critical Section
+
+  bool currentState = digitalRead(CARD_DETECT_PIN);
+
+  // This is the critical IF statement
+  // if Interrupt Has triggered AND Button Pin is in same state AND the debounce
+  // time has expired THEN you have the button push!
+  //
+  if ((save != 0) // interrupt has triggered
+      &&
+      (currentState ==
+       saveLastState) // pin is still in the same state as when intr triggered
+      && (millis() - saveDebounceTimeout >
+          CARD_DETECT_DEBOUNCE_MS)) { // and it has been low for at least
+                                      // DEBOUNCETIME,
+                                      // then valid keypress
+
+    if (currentState == LOW) {
+      Serial.printf("Button is pressed and debounced, current tick=%d\n",
+                    millis());
+    } else {
+      Serial.printf("Button is released and debounced, current tick=%d\n",
+                    millis());
+    }
+
+    Serial.printf("Button Interrupt Triggered %d times, current State=%u, time "
+                  "since last trigger %dms\n",
+                  save, currentState, millis() - saveDebounceTimeout);
+
+    portENTER_CRITICAL_ISR(
+        &mux); // can't change it unless, atomic - Critical section
+    numberOfButtonInterrupts =
+        0; // acknowledge keypress and reset interrupt counter
+    portEXIT_CRITICAL_ISR(&mux);
+  }
+#endif
   yield();
 }
 
