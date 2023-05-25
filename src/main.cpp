@@ -39,11 +39,11 @@ const char *hostname = HOSTNAME;
 SdBaseFile file;
 bool run_dns = false;
 
-volatile int numberOfButtonInterrupts = 0;
-volatile bool lastState;
-volatile uint32_t debounceTimeout = 0;
+volatile int numCdInterrupts = 0;
+volatile bool cdLastState;
+volatile uint32_t cdDebounceTimeout = 0;
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-uint32_t saveDebounceTimeout;
+uint32_t saveCdDebounceTimeout;
 bool saveLastState;
 int save;
 
@@ -54,9 +54,9 @@ void describeCard(SdFat &sd);
 #ifdef CARD_DETECT_PIN
 void IRAM_ATTR cardInsertISR(void) {
   portENTER_CRITICAL_ISR(&mux);
-  numberOfButtonInterrupts++;
-  lastState = digitalRead(CARD_DETECT_PIN);
-  debounceTimeout =
+  numCdInterrupts++;
+  cdLastState = digitalRead(CARD_DETECT_PIN);
+  cdDebounceTimeout =
       xTaskGetTickCount(); // version of millis() that works from interrupt
   portEXIT_CRITICAL_ISR(&mux);
 }
@@ -179,48 +179,25 @@ void loop() {
     dnsServer.processNextRequest();
 
 #ifdef CARD_DETECT_PIN
-  // if (card_detect ^ track_card_detect) {
-  //   Serial.printf("card detect pin changed, now %d\n", card_detect);
-  //   track_card_detect = card_detect;
-  // }
-  portENTER_CRITICAL_ISR(&mux); // so that value of numberOfButtonInterrupts,l
-                                // astState are atomic - Critical Section
-  save = numberOfButtonInterrupts;
-  saveDebounceTimeout = debounceTimeout;
-  saveLastState = lastState;
-  portEXIT_CRITICAL_ISR(&mux); // end of Critical Section
+
+  portENTER_CRITICAL_ISR(&mux);
+  save = numCdInterrupts;
+  saveCdDebounceTimeout = cdDebounceTimeout;
+  saveLastState = cdLastState;
+  portEXIT_CRITICAL_ISR(&mux);
 
   bool currentState = digitalRead(CARD_DETECT_PIN);
 
-  // This is the critical IF statement
-  // if Interrupt Has triggered AND Button Pin is in same state AND the debounce
-  // time has expired THEN you have the button push!
-  //
-  if ((save != 0) // interrupt has triggered
-      &&
-      (currentState ==
-       saveLastState) // pin is still in the same state as when intr triggered
-      && (millis() - saveDebounceTimeout >
-          CARD_DETECT_DEBOUNCE_MS)) { // and it has been low for at least
-                                      // DEBOUNCETIME,
-                                      // then valid keypress
+  if ((save != 0) && (currentState == saveLastState) &&
+      (millis() - saveCdDebounceTimeout > CARD_DETECT_DEBOUNCE_MS)) {
 
     if (currentState == LOW) {
-      Serial.printf("SD card ejected, current tick=%u\n",
-                    millis());
+      Serial.printf("SD card ejected, current tick=%lu\n", millis());
     } else {
-      Serial.printf("SD card inserted, current tick=%u\n",
-                    millis());
+      Serial.printf("SD card inserted, current tick=%lu\n", millis());
     }
-
-    // Serial.printf("Button Interrupt Triggered %d times, current State=%u, time "
-    //               "since last trigger %dms\n",
-    //               save, currentState, millis() - saveDebounceTimeout);
-
-    portENTER_CRITICAL_ISR(
-        &mux); // can't change it unless, atomic - Critical section
-    numberOfButtonInterrupts =
-        0; // acknowledge keypress and reset interrupt counter
+    portENTER_CRITICAL_ISR(&mux);
+    numCdInterrupts = 0;
     portEXIT_CRITICAL_ISR(&mux);
   }
 #endif
