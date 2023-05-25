@@ -1,21 +1,22 @@
-#include <SD.h>
+
+
+
+#include "SdFat.h"
+#include "SPI.h"
+#include "SdFatConfig.h"
 #ifdef M5UNIFIED
 #include <M5Unified.h>
-#endif
-
-#include "SPI.h"
-#include "SdFat.h"
-#include "SdFatConfig.h"
-
+#endif 
 #include <Arduino.h>
 #include <AsyncTCP.h>
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
-#include <SD.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_task_wdt.h>
+
+#define SD_SCK_KHZ(maxkHz) (1000UL * (maxkHz))
 
 DNSServer dnsServer;
 AsyncWebServer server(80);
@@ -30,20 +31,14 @@ const char *hostname = HOSTNAME;
 #define SD_WAIT_MS 2000
 #define MAX_OPEN_FILES 10
 #define SD_MOUNTPOINT "/sd"
-#define SD_SPI_FREQ 50000000
-#define SPI_CLOCK SD_SCK_MHZ(50)
-
-#ifdef M5UNIFIED
-#define SD_CS_PIN 4
-#else
-#define SD_CS_PIN 34
-#endif
-
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SPI_CLOCK)
+#define SD_CONFIG                                                              \
+  SdSpiConfig(SDCARD_CS_PIN, SHARED_SPI, SD_SCK_KHZ(SD_MAX_INIT_RATE_KHZ))
 
 SdBaseFile file;
 bool run_dns = false;
 AsyncStaticSdFatWebHandler *handler;
+
+void describeCard(SdFat &sd);
 
 class CaptiveRequestHandler : public AsyncWebHandler {
 public:
@@ -57,13 +52,15 @@ public:
   }
 };
 
-void describeCard(SdFat &sd);
-
 void notFound(AsyncWebServerRequest *request) {
   request->send(404, "text/plain", "Not found");
 }
 
 void setup() {
+#ifdef ARDUINO_USB_CDC_ON_BOOT
+  delay(3000); // wait for USB to come uo before chatting
+#endif
+
 #ifdef M5UNIFIED
   auto cfg = M5.config();
   cfg.serial_baudrate = BAUD;
@@ -75,16 +72,20 @@ void setup() {
   while (!Serial) {
     yield();
   }
-  // SD.begin();
-#ifdef CUSTOM_SPI_INIT
-  // see
+
+#ifdef GENERIC_ESP32S3
+  // if the default SPI has not been initialized (eg by initing a display)
+  // do so now
+  // 
+  // for pins, see
   // https://github.com/espressif/esp-idf/blob/master/examples/storage/sd_card/sdspi/README.md#pin-assignments
-  SPI.begin(36, 37, 35, 34);
+  SPI.begin(36, 37, 35);
 #endif
 
   handler = new AsyncStaticSdFatWebHandler("/", "/", "");
 
   Serial.printf("trying to mount SD...\n");
+
   uint32_t start = millis();
   bool sd_mounted;
   while (1) {

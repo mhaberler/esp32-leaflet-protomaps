@@ -38,7 +38,8 @@ click on the link and it should take you to the demo app:
 
 
 ## Platforms tested
-
+- M5Stack Core2
+- M5Stack CoreS3
 - Espressif ESP32-S3-DevKitM-1-N8 development board
 
 ## Installation
@@ -92,3 +93,4 @@ Increasing the [request queue size](https://github.com/BalloonWare/AsyncTCP/blob
 With a slow SD card and an active client, it is easy to stall the server with requests. In a standard setup (without fixes above) this typically would trigger a watchdog reset.
 I've set the watchdog timer to a liberal 10 sec.
 
+On the M5Stack Core2 and CoreS3 platforms, SPI speed must be below 25Mhz to run reliably.
