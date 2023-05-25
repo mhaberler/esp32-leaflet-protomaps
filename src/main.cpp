@@ -14,6 +14,7 @@
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
+#include <FastLED.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_task_wdt.h>
@@ -53,6 +54,11 @@ bool handleSD(const bool cardPresent, AsyncStaticSdFatWebHandler *h);
 void describeCard(SdFat &sd);
 bool listDir(const char *dir);
 
+void fastled_setup(void);
+void fastled_show(uint8_t num, const struct CRGB &color);
+void fastled_set(uint8_t num, const struct CRGB &color);
+void fastled_update(void);
+void fastled_get(const uint8_t num, struct CRGB &color);
 
 #ifdef CARD_DETECT_PIN
 void IRAM_ATTR cardInsertISR(void) {
@@ -82,9 +88,13 @@ void notFound(AsyncWebServerRequest *request) {
 }
 
 void setup() {
+  fastled_setup();
+  fastled_show(0, CRGB::Red);
+
 #ifdef ARDUINO_USB_CDC_ON_BOOT
   delay(3000); // wait for USB to come uo before chatting
 #endif
+  fastled_show(0, CRGB::Orange);
 
 #ifdef M5UNIFIED
   auto cfg = M5.config();
@@ -97,6 +107,7 @@ void setup() {
   while (!Serial) {
     yield();
   }
+  fastled_show(0, CRGB::Yellow);
 
 #ifdef CARD_DETECT_PIN
   // Adafruit SD card breakout: this pin shorts to ground if NO card is inserted
@@ -121,16 +132,20 @@ void setup() {
   // initial mount
   sd_mounted = handleSD(true, handler);
   if (!sd_mounted) {
+    fastled_show(0, CRGB::Red);
+
     while (true)
       yield();
   } else {
     healthy = listDir("/");
+    fastled_show(0, CRGB::Green);
   }
 
   Serial.printf("trying to connect to Wifi AP %s using %s\n", ssid, password);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   if (WiFi.waitForConnectResult(5000) != WL_CONNECTED) {
+    fastled_show(0, CRGB::Purple);
     Serial.printf("WiFi connect failed, switching to AP mode using %s %s\n",
                   ap_ssid, ap_password);
     WiFi.mode(WIFI_AP);
@@ -140,6 +155,7 @@ void setup() {
     run_dns = true;
     Serial.printf("IP address: %s\n", WiFi.softAPIP().toString().c_str());
   } else {
+    fastled_show(0, CRGB::Blue);
     Serial.printf("connected to AP %s\n", ssid);
     WiFi.printDiag(Serial);
   }
@@ -212,6 +228,7 @@ bool listDir(const char *dir) {
 }
 
 void loop() {
+
 #ifdef WDT_TIMEOUT
   esp_task_wdt_reset();
 #endif
@@ -231,20 +248,30 @@ void loop() {
       (millis() - saveCdDebounceTimeout > CARD_DETECT_DEBOUNCE_MS)) {
 
     if (currentState == LOW) {
+      fastled_show(0, CRGB::Red);
+
       Serial.printf("SD card ejected, current tick=%lu\n", millis());
       sd_mounted = handleSD(false, handler);
     } else {
+      fastled_show(0, CRGB::Yellow);
+
       Serial.printf("SD card inserted, current tick=%lu\n", millis());
       sd_mounted = handleSD(true, handler);
     }
     if (sd_mounted) {
+      fastled_show(0, CRGB::Green);
+
       healthy = listDir("/");
+    } else {
+      fastled_show(0, CRGB::OrangeRed);
     }
     portENTER_CRITICAL_ISR(&mux);
     numCdInterrupts = 0;
     portEXIT_CRITICAL_ISR(&mux);
   }
 #endif
+
+  fastled_update();
   yield();
 }
 
