@@ -206,16 +206,16 @@ void loop() {
                                       // then valid keypress
 
     if (currentState == LOW) {
-      Serial.printf("Button is pressed and debounced, current tick=%d\n",
+      Serial.printf("SD card ejected, current tick=%u\n",
                     millis());
     } else {
-      Serial.printf("Button is released and debounced, current tick=%d\n",
+      Serial.printf("SD card inserted, current tick=%u\n",
                     millis());
     }
 
-    Serial.printf("Button Interrupt Triggered %d times, current State=%u, time "
-                  "since last trigger %dms\n",
-                  save, currentState, millis() - saveDebounceTimeout);
+    // Serial.printf("Button Interrupt Triggered %d times, current State=%u, time "
+    //               "since last trigger %dms\n",
+    //               save, currentState, millis() - saveDebounceTimeout);
 
     portENTER_CRITICAL_ISR(
         &mux); // can't change it unless, atomic - Critical section
