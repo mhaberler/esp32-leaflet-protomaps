@@ -46,10 +46,13 @@ portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 uint32_t saveCdDebounceTimeout;
 bool saveLastState;
 int save;
+bool sd_mounted, healthy;
 
 AsyncStaticSdFatWebHandler *handler;
-
+bool handleSD(const bool cardPresent, AsyncStaticSdFatWebHandler *h);
 void describeCard(SdFat &sd);
+bool listDir(const char *dir);
+
 
 #ifdef CARD_DETECT_PIN
 void IRAM_ATTR cardInsertISR(void) {
@@ -115,28 +118,14 @@ void setup() {
 
   handler = new AsyncStaticSdFatWebHandler("/", "/", "");
 
-  Serial.printf("trying to mount SD...\n");
-
-  uint32_t start = millis();
-  bool sd_mounted;
-  while (1) {
-    sd_mounted = handler->begin(SD_CONFIG);
-    if (sd_mounted) {
-      Serial.printf("SD mounted.\n");
-      break;
-    }
-    delay(500);
-    if ((millis() - start) > SD_WAIT_MS) {
-      Serial.printf("giving up on SD.\n");
-      break;
-    }
-    Serial.printf("SD waiting... %.f s\n", (millis() - start) / 1000.0);
-  }
+  // initial mount
+  sd_mounted = handleSD(true, handler);
   if (!sd_mounted) {
     while (true)
       yield();
+  } else {
+    healthy = listDir("/");
   }
-  describeCard(handler->_fs);
 
   Serial.printf("trying to connect to Wifi AP %s using %s\n", ssid, password);
   WiFi.mode(WIFI_STA);
@@ -171,6 +160,57 @@ void setup() {
   server.begin();
 }
 
+bool handleSD(const bool cardPresent, AsyncStaticSdFatWebHandler *h) {
+  uint32_t start = millis();
+  bool sd_mounted;
+  if (cardPresent) {
+    while (1) {
+      sd_mounted = h->begin(SD_CONFIG);
+      if (sd_mounted) {
+        Serial.printf("SD mounted.\n");
+        describeCard(h->_fs);
+        return true;
+      }
+      delay(500);
+      if ((millis() - start) > SD_WAIT_MS) {
+        Serial.printf("giving up on SD.\n");
+        return false;
+      }
+      Serial.printf("SD waiting... %.f s\n", (millis() - start) / 1000.0);
+    }
+  } else {
+    return false;
+  }
+}
+
+bool listDir(const char *dir) {
+  Serial.printf("files in %s:\n", dir);
+  SdBaseFile root;
+  if (!root.open("/")) {
+    Serial.printf("dir.open(%s) failed\n", dir);
+    return false;
+  }
+  while (file.openNext(&root, O_RDONLY)) {
+    file.printFileSize(&Serial);
+    Serial.write(' ');
+    file.printModifyDateTime(&Serial);
+    Serial.write(' ');
+    file.printName(&Serial);
+    char f_name[EXFAT_MAX_NAME_LENGTH];
+    file.getName(f_name, EXFAT_MAX_NAME_LENGTH);
+    if (file.isDir()) {
+      Serial.write('/');
+    }
+    Serial.println();
+    file.close();
+  }
+  if (root.getError()) {
+    Serial.println(F("openNext failed"));
+    return false;
+  }
+  return true;
+}
+
 void loop() {
 #ifdef WDT_TIMEOUT
   esp_task_wdt_reset();
@@ -179,7 +219,6 @@ void loop() {
     dnsServer.processNextRequest();
 
 #ifdef CARD_DETECT_PIN
-
   portENTER_CRITICAL_ISR(&mux);
   save = numCdInterrupts;
   saveCdDebounceTimeout = cdDebounceTimeout;
@@ -193,8 +232,13 @@ void loop() {
 
     if (currentState == LOW) {
       Serial.printf("SD card ejected, current tick=%lu\n", millis());
+      sd_mounted = handleSD(false, handler);
     } else {
       Serial.printf("SD card inserted, current tick=%lu\n", millis());
+      sd_mounted = handleSD(true, handler);
+    }
+    if (sd_mounted) {
+      healthy = listDir("/");
     }
     portENTER_CRITICAL_ISR(&mux);
     numCdInterrupts = 0;
