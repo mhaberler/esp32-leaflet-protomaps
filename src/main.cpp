@@ -49,8 +49,9 @@ bool saveLastState;
 int save;
 bool sd_mounted, healthy;
 
-AsyncStaticSdFatWebHandler *handler;
-bool handleSD(const bool cardPresent, AsyncStaticSdFatWebHandler *h);
+SdFat sdfat;
+
+bool handleSD(const bool cardPresent, SdFat &sdfat);
 void describeCard(SdFat &sd);
 bool listDir(const char *dir);
 
@@ -127,10 +128,9 @@ void setup() {
   SPI.begin(36, 37, 35);
 #endif
 
-  handler = new AsyncStaticSdFatWebHandler("/", "/", "");
 
   // initial mount
-  sd_mounted = handleSD(true, handler);
+  sd_mounted = handleSD(true, sdfat);
   if (!sd_mounted) {
     fastled_show(0, CRGB::Red);
 
@@ -171,20 +171,20 @@ void setup() {
 #endif
 
   server.onNotFound(notFound);
-  server.addHandler(handler);
+  server.serveStatic("/", &sdfat, "/", "");
   server.addHandler(new CaptiveRequestHandler());
   server.begin();
 }
 
-bool handleSD(const bool cardPresent, AsyncStaticSdFatWebHandler *h) {
+bool handleSD(const bool cardPresent, SdFat &sdfat) {
   uint32_t start = millis();
-  bool sd_mounted;
+
   if (cardPresent) {
     while (1) {
-      sd_mounted = h->begin(SD_CONFIG);
+      bool sd_mounted = sdfat.begin(SD_CONFIG);
       if (sd_mounted) {
         Serial.printf("SD mounted.\n");
-        describeCard(h->_fs);
+        describeCard(sdfat);
         return true;
       }
       delay(500);
@@ -251,12 +251,12 @@ void loop() {
       fastled_show(0, CRGB::Red);
 
       Serial.printf("SD card ejected, current tick=%lu\n", millis());
-      sd_mounted = handleSD(false, handler);
+      sd_mounted = handleSD(false, sdfat);
     } else {
       fastled_show(0, CRGB::Yellow);
 
       Serial.printf("SD card inserted, current tick=%lu\n", millis());
-      sd_mounted = handleSD(true, handler);
+      sd_mounted = handleSD(true, sdfat);
     }
     if (sd_mounted) {
       fastled_show(0, CRGB::Green);
